@@ -2,7 +2,7 @@ package xyz.arwhite.net.proxit;
 
 public class Main {
 	
-	public Main() {
+	public Main() throws Exception {
 		var serverThread = new Thread(new ProxyServer(10));
 		serverThread.start();
 		
@@ -16,7 +16,7 @@ public class Main {
 		
 	}
 
-	public static void main(String[] args) {
+	public static void main(String[] args) throws Exception {
 		new Main();
 	}
 

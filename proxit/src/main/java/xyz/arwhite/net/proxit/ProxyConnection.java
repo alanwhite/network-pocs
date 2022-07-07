@@ -11,11 +11,22 @@ import java.net.SocketException;
 import java.net.URI;
 import java.net.URISyntaxException;
 import java.net.UnknownHostException;
+import java.net.http.HttpHeaders;
 import java.util.ArrayList;
+import java.util.Base64;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.Callable;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.stream.Collectors;
+
+import io.fusionauth.jwt.JWTExpiredException;
+import io.fusionauth.jwt.JWTUnavailableForProcessingException;
+import io.fusionauth.jwt.Verifier;
+import io.fusionauth.jwt.domain.JWT;
+import io.fusionauth.jwt.rsa.RSAVerifier;
+import xyz.arwhite.net.auth.AuthServer;
 
 public class ProxyConnection implements Runnable {
 
@@ -24,10 +35,12 @@ public class ProxyConnection implements Runnable {
 
 	private Socket clientConn;
 	private ExecutorService workerPool;
-	
-	public ProxyConnection(Socket conn, ExecutorService ioWorkerPool) {
+	private AuthServer authServer;
+
+	public ProxyConnection(Socket conn, ExecutorService ioWorkerPool, AuthServer authServer) {
 		clientConn = conn;
 		workerPool = ioWorkerPool;
+		this.authServer = authServer;
 	}
 
 	@Override
@@ -35,6 +48,7 @@ public class ProxyConnection implements Runnable {
 
 		try {
 
+			System.out.println("Processing connection ...");
 			clientConn.setSoTimeout(60000);
 
 			var proxyRequest = readRequest(clientConn);
@@ -43,7 +57,11 @@ public class ProxyConnection implements Runnable {
 				return;
 			}
 
-			// Pass the baton to the execute side
+			/*
+			 * All validation of the request has been successful to pass the baton to 
+			 * the execution side, connecting to the intended target, informing the original
+			 * caller if successful and then relaying all IO until the connection is interrupted.
+			 */
 
 			var openResult = openTarget(proxyRequest.endpoint);
 			if ( openResult.response != 200 ) {
@@ -70,10 +88,12 @@ public class ProxyConnection implements Runnable {
 	private ProxyRequest readRequest(Socket clientConn) {
 
 		try {
+			System.out.println("Reading request");
 			var clientReader = new BufferedReader(new InputStreamReader(clientConn.getInputStream(), "US-ASCII"));
 
 			String httpRequest = clientReader.readLine();
 
+			System.out.println("Analysing request");
 			String[] requestWords = httpRequest.split(" ");
 			if ( requestWords.length != 3 ) {
 				// HTTP/1.1 400 Too Many Words In Request
@@ -85,16 +105,76 @@ public class ProxyConnection implements Runnable {
 				return new ProxyRequest("Only CONNECT Implemented",501);
 			}
 
-			// Discard headers, not currently used
+			// Grab headers
+			List<String> headerStrings = new ArrayList<>();
 			String headerLine = clientReader.readLine();
-			while(headerLine.length() != 0 ) 
+			while(headerLine.length() != 0 ) {
+				headerStrings.add(headerLine);
 				headerLine = clientReader.readLine();
+			}
+
+			var headers = Headers.parse(headerStrings);
+			// Headers.prettyPrint(headers);
+
+			System.out.println("Checking authorization for request");
+			if ( !authorize(headers) )
+				return new ProxyRequest("Proxy Authorization Failed",403);
 
 			return new ProxyRequest(requestWords[1],200);
 
-		} catch (IOException e) {
+		} catch (Exception e) {
 			e.printStackTrace();
 			return new ProxyRequest("",500);
+		}
+	}
+
+	/**
+	 * When using http basic authentication of the form http://user:pass@wherever.com 
+	 * the user:pass string is stripped away, encoded in Base64 and added as 
+	 * a header called Proxy-Authorization.
+	 * 
+	 * In this implementation the user element is not used, and the password is expected
+	 * to contain a signed JWT issued by the trusted auth server.
+	 * 
+	 * @param headers
+	 * @return true if the JWT is valid and issued by our trusted issuer
+	 */
+	private boolean authorize(Map<String,List<String>> headers) {
+
+		try {
+			System.out.println("Analysing headers");
+			var authTokens = headers.get("Proxy-Authorization");
+			if ( authTokens == null )
+				return false;
+
+			if ( authTokens.size() != 1 )
+				return false;
+
+			String[] words = authTokens.get(0).split(" ");
+			if ( words == null || words.length != 2 || words[0] == null )
+				return false;
+
+			if ( !"Basic".equals(words[0]) ) 
+				return false;
+
+			System.out.println("Analysing basic auth tokens");
+			String basicToken = new String(Base64.getDecoder().decode(words[1]));
+			System.out.println(basicToken);
+
+			String[] creds = basicToken.split(":");
+			if ( creds == null || creds.length != 2 )
+				return false;
+
+			System.out.println("Validating JWT");
+			JWT jwt = JWT.getDecoder().decode(creds[1], authServer.getSigVerifiers());
+
+			System.out.println(jwt.getObject("resource_access"));
+			
+			return true;
+		}
+		catch(Exception e) {
+			e.printStackTrace();
+			return false;
 		}
 	}
 
@@ -103,6 +183,7 @@ public class ProxyConnection implements Runnable {
 		try {
 			var clientWriter = new BufferedWriter(new OutputStreamWriter(clientConn.getOutputStream(), "US-ASCII"));
 			clientWriter.write("HTTP/1.1 "+response+" "+reason);
+			clientWriter.write("\r\n");
 			clientWriter.flush();
 
 			clientConn.close();
@@ -163,14 +244,14 @@ public class ProxyConnection implements Runnable {
 		} catch (InterruptedException e1) {
 			// e1.printStackTrace();
 		}
-		
+
 		// try and close connections, irrespective of what state they're in
 		try {
 			clientConn.close();
 		} catch (IOException e) {
 			e.printStackTrace();
 		}
-		
+
 		try {
 			targetConn.close();
 		} catch (IOException e) {
