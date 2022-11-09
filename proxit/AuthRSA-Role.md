@@ -6,6 +6,18 @@ signed by a trusted auth server.
 This example uses keycloak as the Auth Server and FusionAuth's
 Java JWT library. 
 
+This is an example of the Resource Owners Password Credentials Flow (RFC 6749), where Keycloak acts as the Authorization Server for proxit, which is the Resource Server. The requesting client application, that requests the users credentials and uses them to obtain the Access Token is represented by curl.
+
+The resource that proxit provides is the Proxied-URLs. It represents all URLs that can be proxied to. There is an authorization policy that is common to all Proxied-URLs.
+
+We have a policy that says access to the Proxied-URL group of resources requires the requesting identity to have a role of 'connector-role'.
+
+Proxit must be defined as a confidential client in OAuth terms to be defined in Keycloak as a Resource Server.
+
+The Scope for the Proxied-URLs resource that matters is the 'connect' scope. 
+
+For permissions, the role 'connector-role' can perform the action 'connect' on the protected resource Proxied-URLs. 
+
 ## Set up a Root CA
 
 Generate key file and self-sign a cert with it
@@ -150,7 +162,7 @@ Create a client app to represent the proxit proxy, and a shared secret for it to
 
 
 ```
-$ bin/kcadm.sh create clients -r proxit-realm -s clientId=proxit-proxy -s enabled=true -s clientAuthenticatorType=client-secret -s secret=proxit-shhh -s directAccessGrantsEnabled=true
+$ bin/kcadm.sh create clients -r proxit-realm -s clientId=proxit-proxy -s enabled=true -s clientAuthenticatorType=client-secret -s secret=proxit-shhh -s directAccessGrantsEnabled=true -s authorizationServicesEnabled=true
 Created new client with id '8b8d2095-b496-42c3-8de3-0e63a3967765'
 
 $ CLIENTID=`bin/kcadm.sh get clients -r proxit-realm --fields id --format csv --noquotes -q clientId=proxit-proxy`
