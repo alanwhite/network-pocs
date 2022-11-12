@@ -10,14 +10,18 @@ import java.net.SocketAddress;
 import java.net.URI;
 import java.net.URISyntaxException;
 import java.net.UnknownHostException;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.concurrent.Callable;
+import java.util.concurrent.Executors;
 
 public class ProxyRunner implements Runnable {
 
-	Socket conn;
+	Socket localSocket;
 	String proxy, proxyUser, proxyPass, remoteHost;
 
-	public ProxyRunner(Socket conn, String proxy, String proxyUser, String proxyPass, String remoteHost) {
-		this.conn = conn;
+	public ProxyRunner(Socket localsocket, String proxy, String proxyUser, String proxyPass, String remoteHost) {
+		this.localSocket = localsocket;
 		this.proxy = proxy;
 		this.proxyUser = proxyUser;
 		this.proxyPass = proxyPass;
@@ -47,6 +51,22 @@ public class ProxyRunner implements Runnable {
 				remoteSocket.setSoTimeout(60000);
 
 				// relay stuff
+				
+				List<Callable<Object>> tasks = new ArrayList<>(2);
+				tasks.add(Executors.callable(new IORelay(localSocket,remoteSocket)));
+				tasks.add(Executors.callable(new IORelay(remoteSocket,localSocket)));
+				var exec = Executors.newVirtualThreadPerTaskExecutor();
+				
+				// not much we can do re any error during relaying 
+				try {
+					exec.invokeAll(tasks);
+				} catch (InterruptedException e1) {}
+				
+				// ignore any error, this is close if we can, if not, it's probably already closed
+				try { 
+					localSocket.close();
+				} catch (IOException e) {}
+				
 			}			
 
 		} catch (URISyntaxException e) {
@@ -55,6 +75,44 @@ public class ProxyRunner implements Runnable {
 			e.printStackTrace();
 		} catch (IOException e) {
 			e.printStackTrace();
+		}
+
+	}
+	
+	private class IORelay implements Runnable {
+
+		Socket in, out;
+
+		public IORelay(Socket in, Socket out) {
+			this.in = in;
+			this.out = out;
+		}
+
+		@Override
+		public void run() {
+			try {
+				var input = in.getInputStream();
+				var output = out.getOutputStream();
+
+				input.transferTo(output);
+
+//				byte[] buffer = new byte[4096];
+//				int bytesRead = input.read(buffer);
+//
+//				while ( bytesRead != 0 ) {
+//					output.write(buffer, 0, bytesRead);
+//
+//					// if will block, flush out stream
+//					if ( input.available() < 1 )
+//						output.flush();
+//
+//					bytesRead = input.read(buffer);					
+//				}
+
+			} catch (IOException e) {
+				if ( !e.getMessage().equals("Connection reset") ) 
+					e.printStackTrace();
+			}
 		}
 
 	}
