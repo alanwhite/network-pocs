@@ -9,7 +9,7 @@ public class Headers {
 	public static Map<String,List<String>> parse(List<String> headerStrings) {
 		
 		return headerStrings.stream()
-				.collect(Collectors.groupingBy(s -> s.split(":",2)[0].strip(), 
+				.collect(Collectors.groupingBy(s -> s.split(":",2)[0].strip().toLowerCase(), 
 						Collectors.mapping(
 								s -> s.split(":",2)[1].strip(),
 								Collectors.toList())));

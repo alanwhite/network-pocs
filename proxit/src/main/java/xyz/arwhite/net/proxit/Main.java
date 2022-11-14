@@ -1,7 +1,5 @@
 package xyz.arwhite.net.proxit;
 
-import java.util.Optional;
-
 public class Main {
 	
 	public Main(boolean vThreads) throws Exception {

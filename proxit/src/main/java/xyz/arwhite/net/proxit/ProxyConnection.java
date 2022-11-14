@@ -54,7 +54,7 @@ public class ProxyConnection implements Runnable {
 			var proxyRequest = readAndAuthorizeRequest(clientConn);
 			if (proxyRequest.response != 200 ) {
 				writeErrorResponseAndClose(clientConn,proxyRequest.response,
-						proxyRequest.endpoint, Optional.empty());
+						proxyRequest.endpoint, proxyRequest.responseHeaders);
 				return;
 			}
 
@@ -116,20 +116,19 @@ public class ProxyConnection implements Runnable {
 
 			// Headers.prettyPrint(headers);
 
-			if ( authServer != null ) {
-				System.out.println("Checking authorization for request");
+			System.out.println("Checking authorization for request");
 
-				var authTokens = headers.get("Proxy-Authorization");
-				if ( authTokens == null || authTokens.size() != 1 ) {
-					var outHeaders = new HashMap<String,List<String>>();
-					outHeaders.put("Proxy-Authenticate", Arrays.asList("Basic", "Bearer"));
-					return new ProxyRequest("Proxy Authorization Required",407,Optional.of(outHeaders));
-				}
-
-				if ( !authorize(authTokens.get(0)) )
-					return new ProxyRequest("Proxy Authorization Failed",403,Optional.empty());
+			// headers should be compared case insensitive
+			var authTokens = headers.get("proxy-authorization");
+			if ( authTokens == null || authTokens.size() != 1 ) {
+				var outHeaders = new HashMap<String,List<String>>();
+				outHeaders.put("Proxy-Authenticate", Arrays.asList("Basic", "Bearer"));
+				return new ProxyRequest("Proxy Authorization Required",407,Optional.of(outHeaders));
 			}
-			
+
+			if ( !authorize(authTokens.get(0)) )
+				return new ProxyRequest("Proxy Authorization Failed",403,Optional.empty());
+
 			return new ProxyRequest(requestWords[1],200,Optional.empty());
 
 		} catch (Exception e) {
@@ -139,13 +138,15 @@ public class ProxyConnection implements Runnable {
 	}
 
 	/**
-	 * Validate if the supplied JWT is signed by the trusted Auth Server.
+	 * If using an Auth Server, validate if the supplied JWT is signed by the trusted Auth Server.
 	 * 
 	 * If the caller used http basic authentication of the form http://user:password@wherever.com 
 	 * then the JWT must be supplied as the password property.
 	 * 
 	 * The caller can provide the JWT as a bearer token if they can provide the
 	 * Proxy-Authorization header directly - many clients don't know how to pass proxy headers.
+	 * 
+	 * If not using an Auth Server, any old user:pass will do ...!
 	 * 
 	 * @param string the value provided in the Proxy-Authorization header
 	 * @return true if the JWT is valid and issued by our trusted issuer
@@ -159,36 +160,43 @@ public class ProxyConnection implements Runnable {
 			if ( words == null || words.length != 2 || words[0] == null || words[1] == null )
 				return false;
 
-			String token = "";
-
-			if ( "Bearer".equals(words[0]) ) 
-				token = words[1];
-
-			else if ( "Basic".equals(words[0]) ) {
+			String basicUser = "";
+			String basicPass = "";
+			
+			if ( "Basic".equals(words[0]) ) {
 				String basicToken = new String(Base64.getDecoder().decode(words[1]));
-				System.out.println(basicToken);
 
 				String[] creds = basicToken.split(":");
 				if ( creds == null || creds.length != 2 )
 					return false;
+			
+				basicUser = creds[0];
+				basicPass = creds[1];
+			}
+			
+			if ( authServer != null ) { 
+				String token = "";
 
-				token = creds[1];
+				if ( "Bearer".equals(words[0]) ) 
+					token = words[1];
 
-			} else // JWT wasn't provided either way
-				return false;
+				else if ( basicPass != "" ) {
+					token = basicPass;
 
-			System.out.println("Validating JWT");
-			JWT jwt = JWT.getDecoder().decode(token, authServer.getSigVerifiers());
+				} else // JWT wasn't provided either way
+					return false;
 
-			jwt.getAllClaims().entrySet().forEach(System.out::println);
+				System.out.println("Validating JWT");
+				JWT jwt = JWT.getDecoder().decode(token, authServer.getSigVerifiers());
 
-			//			System.out.println(jwt.getObject("resource_access").getClass());
-			//			LinkedHashMap resourceAccess = (LinkedHashMap) jwt.getObject("resource_access");
-			//			resourceAccess.entrySet().forEach(entry -> {
-			//				System.out.println("E: "+entry);	
-			//			});
+				// jwt.getAllClaims().entrySet().forEach(System.out::println);
 
-			return true;
+				return true;
+			} else {
+				// provide any old user:pass, but you have to provide it
+				System.out.println("Authorized user "+basicUser+", password "+basicPass);
+				return true;
+			}
 
 		} catch(Exception e) {
 			e.printStackTrace();
@@ -248,8 +256,10 @@ public class ProxyConnection implements Runnable {
 				entry -> entry.getValue().forEach(
 						val -> outHeaders.add(entry.getKey()+": " + val)));
 
-		for ( var hdr : outHeaders )
+		for ( var hdr : outHeaders ) {
+			System.out.println(hdr);
 			clientWriter.write(hdr+"\r\n");
+		}
 	}
 
 	private TargetConnection openTarget(String requestTarget) {
