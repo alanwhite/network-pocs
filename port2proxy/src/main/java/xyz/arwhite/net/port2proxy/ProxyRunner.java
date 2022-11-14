@@ -1,16 +1,14 @@
 package xyz.arwhite.net.port2proxy;
 
+import java.io.BufferedReader;
 import java.io.IOException;
-import java.net.Authenticator;
-import java.net.InetSocketAddress;
-import java.net.PasswordAuthentication;
-import java.net.Proxy;
+import java.io.InputStreamReader;
 import java.net.Socket;
-import java.net.SocketAddress;
 import java.net.URI;
 import java.net.URISyntaxException;
 import java.net.UnknownHostException;
 import java.util.ArrayList;
+import java.util.Base64;
 import java.util.List;
 import java.util.concurrent.Callable;
 import java.util.concurrent.Executors;
@@ -32,51 +30,55 @@ public class ProxyRunner implements Runnable {
 	public void run() {
 
 		try {
-			// because some bright spark at Oracle thinks nobody should use basic auth for anything ever
-			System.setProperty("jdk.http.auth.tunneling.disabledSchemes", "");
-			
-			/*
-			 * Really dumb! Any site can fail any http request coming from this java VM
-			 * with a 407 and then we send them our password .... could add checks that
-			 * it's the proxy we wanted but that's still dumb. What's making this so dumb
-			 * is Java always tries to connect to a proxy with no Auth, even if you want it,
-			 * and waits for a 407 before figuring it out. 
-			 * 
-			 * TODO: Replace this code with a custom proxy socket that writes CONNECT itself
-			 */
-			Authenticator.setDefault( new Authenticator() {
-				public PasswordAuthentication getPasswordAuthentication() {
-					return new PasswordAuthentication(proxyUser, proxyPass.toCharArray());
-				}
-			});
-
 			var proxyUri = new URI(null,proxy,null,null,null);
-			SocketAddress proxyAddr = new InetSocketAddress(proxyUri.getHost(), proxyUri.getPort());
-			Proxy proxy = new Proxy(Proxy.Type.HTTP, proxyAddr);
-			
-			try (var remoteSocket = new Socket(proxy)) {
+			try (var remoteSocket = new Socket(proxyUri.getHost(),proxyUri.getPort())) {
+
 				var uri = new URI(null,remoteHost,null,null,null);
 
-				remoteSocket.connect(new InetSocketAddress(uri.getHost(), uri.getPort()));
-				remoteSocket.setSoTimeout(60000);
+				String connect = "CONNECT " + uri.getHost() + ":" + uri.getPort() + " HTTP/1.1\n";
+				remoteSocket.getOutputStream().write(connect.getBytes());
 
-				// relay stuff
+				if ( !proxyUser.isBlank() ) {
+					var creds = proxyUser + ":" + proxyPass;
+					String auth = "Proxy-Authorization: Basic " 
+							+ Base64.getEncoder().encodeToString(creds.getBytes()) + "\n";
+					remoteSocket.getOutputStream().write(auth.getBytes());
+				}
+
+				remoteSocket.getOutputStream().write("\n".getBytes());
+
+				var reader = new BufferedReader(
+						new InputStreamReader(remoteSocket.getInputStream(), "US-ASCII"));
+				var httpResponse = reader.readLine();
+				var words = httpResponse.split(" ");
+				if ( words.length != 3 || !"200".equals(words[1]) ) {
+					System.err.println("Unhandled response from proxy "+httpResponse);
+					return;
+				}
 				
+				// drain and ignore any response headers
+				int len = -1;
+				while ( len != 0 ) {
+					var line = reader.readLine();
+					len = line.length();
+				}
+				
+				// bi-directionally relay data between sockets
 				List<Callable<Object>> tasks = new ArrayList<>(2);
 				tasks.add(Executors.callable(new IORelay(localSocket,remoteSocket)));
 				tasks.add(Executors.callable(new IORelay(remoteSocket,localSocket)));
 				var exec = Executors.newVirtualThreadPerTaskExecutor();
-				
-				// not much we can do re any error during relaying 
+
+				// not much we can do with error during relaying 
 				try {
 					exec.invokeAll(tasks);
 				} catch (InterruptedException e1) {}
-				
+
 				// ignore any error, this is "close if we can", if not, it's probably already closed
 				try { 
 					localSocket.close();
 				} catch (IOException e) {}
-				
+
 			}			
 
 		} catch (URISyntaxException e) {
@@ -88,7 +90,7 @@ public class ProxyRunner implements Runnable {
 		}
 
 	}
-	
+
 	private class IORelay implements Runnable {
 
 		Socket in, out;
@@ -105,20 +107,7 @@ public class ProxyRunner implements Runnable {
 				var output = out.getOutputStream();
 
 				input.transferTo(output);
-
-//				byte[] buffer = new byte[4096];
-//				int bytesRead = input.read(buffer);
-//
-//				while ( bytesRead != 0 ) {
-//					output.write(buffer, 0, bytesRead);
-//
-//					// if will block, flush out stream
-//					if ( input.available() < 1 )
-//						output.flush();
-//
-//					bytesRead = input.read(buffer);					
-//				}
-
+				
 			} catch (IOException e) {
 				if ( !e.getMessage().equals("Connection reset") ) 
 					e.printStackTrace();
