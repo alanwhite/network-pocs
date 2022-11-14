@@ -194,7 +194,7 @@ public class ProxyConnection implements Runnable {
 				return true;
 			} else {
 				// provide any old user:pass, but you have to provide it
-				System.out.println("Authorized user "+basicUser+", password "+basicPass);
+				System.out.println("Authorized user "+basicUser);
 				return true;
 			}
 
