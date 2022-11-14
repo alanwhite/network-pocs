@@ -34,6 +34,16 @@ public class ProxyRunner implements Runnable {
 		try {
 			// because some bright spark at Oracle thinks nobody should use basic auth for anything ever
 			System.setProperty("jdk.http.auth.tunneling.disabledSchemes", "");
+			
+			/*
+			 * Really dumb! Any site can fail any http request coming from this java VM
+			 * with a 407 and then we send them our password .... could add checks that
+			 * it's the proxy we wanted but that's still dumb. What's making this so dumb
+			 * is Java always tries to connect to a proxy with no Auth, even if you want it,
+			 * and waits for a 407 before figuring it out. 
+			 * 
+			 * TODO: Replace this code with a custom proxy socket that writes CONNECT itself
+			 */
 			Authenticator.setDefault( new Authenticator() {
 				public PasswordAuthentication getPasswordAuthentication() {
 					return new PasswordAuthentication(proxyUser, proxyPass.toCharArray());
@@ -43,7 +53,7 @@ public class ProxyRunner implements Runnable {
 			var proxyUri = new URI(null,proxy,null,null,null);
 			SocketAddress proxyAddr = new InetSocketAddress(proxyUri.getHost(), proxyUri.getPort());
 			Proxy proxy = new Proxy(Proxy.Type.HTTP, proxyAddr);
-
+			
 			try (var remoteSocket = new Socket(proxy)) {
 				var uri = new URI(null,remoteHost,null,null,null);
 
@@ -62,7 +72,7 @@ public class ProxyRunner implements Runnable {
 					exec.invokeAll(tasks);
 				} catch (InterruptedException e1) {}
 				
-				// ignore any error, this is close if we can, if not, it's probably already closed
+				// ignore any error, this is "close if we can", if not, it's probably already closed
 				try { 
 					localSocket.close();
 				} catch (IOException e) {}
