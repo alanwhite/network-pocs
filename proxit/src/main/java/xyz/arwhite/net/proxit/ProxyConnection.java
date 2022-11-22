@@ -35,9 +35,9 @@ public class ProxyConnection implements Runnable {
 
 	private Socket clientConn;
 	private ExecutorService ioWorkerpool;
-	private AuthServer authServer;
+	private Optional<AuthServer> authServer;
 
-	public ProxyConnection(Socket conn, ExecutorService ioWorkerPool, AuthServer authServer) {
+	public ProxyConnection(Socket conn, ExecutorService ioWorkerPool, Optional<AuthServer> authServer) {
 		clientConn = conn;
 		this.ioWorkerpool = ioWorkerPool;
 		this.authServer = authServer;
@@ -174,7 +174,7 @@ public class ProxyConnection implements Runnable {
 				basicPass = creds[1];
 			}
 			
-			if ( authServer != null ) { 
+			if ( authServer.isPresent() ) { 
 				String token = "";
 
 				if ( "Bearer".equals(words[0]) ) 
@@ -187,7 +187,7 @@ public class ProxyConnection implements Runnable {
 					return false;
 
 				System.out.println("Validating JWT");
-				JWT jwt = JWT.getDecoder().decode(token, authServer.getSigVerifiers());
+				JWT jwt = JWT.getDecoder().decode(token, authServer.get().getSigVerifiers());
 
 				// jwt.getAllClaims().entrySet().forEach(System.out::println);
 

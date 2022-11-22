@@ -3,6 +3,8 @@ package xyz.arwhite.net.auth;
 import java.net.URI;
 import java.util.concurrent.ConcurrentHashMap;
 
+import javax.net.ssl.SSLContext;
+
 import io.fusionauth.jwt.Verifier;
 import io.fusionauth.jwt.rsa.RSAVerifier;
 
@@ -38,8 +40,8 @@ public class CertsCache extends ConcurrentHashMap<String, Verifier>{
 				.isEmpty() );
 	}
 
-	public static void refresh(CertsCache cache, OpenIDConfiguration oidConfig) throws Exception {
-		refresh(cache, OpenIDConnectCerts.fetchFrom(URI.create(oidConfig.jwksUri)));
+	public static void refresh(CertsCache cache, OpenIDConfiguration oidConfig, SSLContext sslContext) throws Exception {
+		refresh(cache, OpenIDConnectCerts.fetchFrom(URI.create(oidConfig.jwksUri), sslContext));
 	}
 
 }

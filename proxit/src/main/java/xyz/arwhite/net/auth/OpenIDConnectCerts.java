@@ -11,6 +11,8 @@ import java.net.http.HttpResponse.BodyHandlers;
 import java.time.Duration;
 import java.util.List;
 
+import javax.net.ssl.SSLContext;
+
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.PropertyNamingStrategies;
 import com.fasterxml.jackson.databind.annotation.JsonNaming;
@@ -20,12 +22,13 @@ public class OpenIDConnectCerts {
 	
 	public List<OpenIDConnectKey> keys;
 	
-	public static OpenIDConnectCerts fetchFrom(URI jwksURI) throws Exception {
+	public static OpenIDConnectCerts fetchFrom(URI jwksURI, SSLContext sslContext) throws Exception {
 		
 		HttpClient client = HttpClient.newBuilder()
 				.version(Version.HTTP_1_1)
 				.followRedirects(Redirect.NORMAL)
 				.connectTimeout(Duration.ofSeconds(20))
+				.sslContext(sslContext)
 				.build();
 		
 		HttpRequest request = HttpRequest.newBuilder()

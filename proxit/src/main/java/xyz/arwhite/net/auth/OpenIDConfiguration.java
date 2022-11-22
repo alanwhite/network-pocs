@@ -12,6 +12,8 @@ import java.time.Duration;
 import java.util.List;
 import java.util.Map;
 
+import javax.net.ssl.SSLContext;
+
 import com.fasterxml.jackson.annotation.JsonProperty;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.PropertyNamingStrategies;
@@ -93,7 +95,7 @@ public class OpenIDConfiguration {
         this.mtlsBackchannelAuthenticationEndpoint = (String)mtls_endpoint_aliases.get("backchannel_authentication_endpoint");
     }
 	
-	public static OpenIDConfiguration fetchFrom(URI authServerURI) throws Exception {
+	public static OpenIDConfiguration fetchFrom(URI authServerURI, SSLContext sslContext) throws Exception {
 		
 		HttpClient client = HttpClient.newBuilder()
 				.version(Version.HTTP_1_1)
