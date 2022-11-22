@@ -38,6 +38,12 @@ public class ProxyServer implements Runnable {
 	private final static String AUTH_SERVER_CACERT_ENV_VAR = "PROXIT_AUTH_CACERT";
 
 	/*
+	 * If this env variable is set to the name of a file containing a cert
+	 * and private key, proxit will only accept encrypted CONNECT requests
+	 */
+	private final static String PROXY_TLS_CERT = "PROXIT_TLS_CERT";
+	
+	/*
 	 * Used if not using java virtual threads
 	 */
 	private ExecutorService connectionPool;
@@ -96,16 +102,23 @@ public class ProxyServer implements Runnable {
 		}
 
 		/*
-		 * Establish authorisation server integration
-		 * 
-		 * Note: if using self-signed TLS certs on the Auth Server, ensure the jvm has
-		 * loaded your custom cacerts file using the runtime flag
-		 * java -Djavax.net.ssl.trustStore=../cacerts -Djavax.net.ssl.trustStorePassword=$TS_PASSWORD
-		 * 
-		 * or supply a PEM file
+		 * Set up Auth Server integration if requested
 		 */
-
-		var authServerURL = System.getenv(AUTH_SERVER_ENV_VAR);
+		authServer = this.configureAnyAuthServer(System.getenv(AUTH_SERVER_ENV_VAR));
+		
+	}
+	
+	/**
+	 * Establish authorisation server integration 
+	 * 
+	 * Note: if using self-signed TLS certs on the Auth Server, ensure the jvm has
+	 * loaded your custom cacerts file using the runtime flag
+	 * java -Djavax.net.ssl.trustStore=../cacerts -Djavax.net.ssl.trustStorePassword=$TS_PASSWORD
+	 * 
+	 * or supply a PEM file 
+	 */
+	private Optional<AuthServer> configureAnyAuthServer(String authServerURL) {
+		Optional<AuthServer> response = Optional.empty();
 		
 		if ( authServerURL == null ) {
 			System.out.println("Not using token authentication");
@@ -115,13 +128,15 @@ public class ProxyServer implements Runnable {
 					(String) Objects.requireNonNullElse(System.getenv(AUTH_SERVER_CACERT_ENV_VAR), Optional.empty()));
 			
 			try {
-				authServer = Optional.of(new AuthServer(URI.create(authServerURL),cacertFile));
+				response = Optional.of(new AuthServer(URI.create(authServerURL),cacertFile));
 				
 			} catch (Exception e) {
 				System.out.println("Unable to use the specified Auth Server URL");
 				e.printStackTrace();
 			}
 		}
+		
+		return response;
 	}
 
 	public void run() {
