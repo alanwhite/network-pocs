@@ -1,13 +1,33 @@
 package xyz.arwhite.net.proxit;
 
+import java.io.BufferedReader;
+import java.io.ByteArrayInputStream;
+import java.io.FileInputStream;
+import java.io.FileNotFoundException;
 import java.io.IOException;
+import java.io.InputStreamReader;
 import java.net.ServerSocket;
 import java.net.Socket;
 import java.net.URI;
+import java.security.KeyFactory;
+import java.security.KeyStore;
+import java.security.KeyStoreException;
+import java.security.NoSuchAlgorithmException;
+import java.security.cert.Certificate;
+import java.security.cert.CertificateException;
+import java.security.cert.CertificateFactory;
+import java.security.spec.InvalidKeySpecException;
+import java.security.spec.PKCS8EncodedKeySpec;
+import java.util.ArrayList;
+import java.util.Base64;
+import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+
+import javax.net.ServerSocketFactory;
+import javax.net.ssl.SSLServerSocketFactory;
 
 import xyz.arwhite.net.auth.AuthServer;
 
@@ -23,14 +43,14 @@ public class ProxyServer implements Runnable {
 	 * the TCP Port the proxy listens on
 	 */
 	private final static String PROXIT_PORT_ENV_VAR = "PROXIT_PORT";
-	
+
 	/*
 	 * If defined, proxit will use the Auth Server at this URL to validate 
 	 * JWTs provided either as passwords in basic auth, or bearer tokens as 
 	 * a proxy header.
 	 */
 	private final static String AUTH_SERVER_ENV_VAR = "PROXIT_AUTH_SERVER";
-	
+
 	/*
 	 * If this env variable is set to the name of a file containing a cacert pem
 	 * it will be used to validate the certs presented by the Auth Server 
@@ -38,22 +58,37 @@ public class ProxyServer implements Runnable {
 	private final static String AUTH_SERVER_CACERT_ENV_VAR = "PROXIT_AUTH_CACERT";
 
 	/*
-	 * If this env variable is set to the name of a file containing a cert
+	 * If this env variable is set to the name of a PEM file containing a cert
 	 * and private key, proxit will only accept encrypted CONNECT requests
 	 */
-	private final static String PROXY_TLS_CERT = "PROXIT_TLS_CERT";
+	private final static String PROXY_TLS_PEM = "PROXIT_TLS_PEM";
 	
+	/*
+	 * Required if the PROXY_TLS_PEM variable is set, in order to decrypt the
+	 * private key in the PEM file. 
+	 * 
+	 * TODO: encrypted private keys NOT YET SUPPORTED private keys must not encrypted in
+	 * the pkcs12 pem file (hint: openssl pkcas12 -nodes)
+	 */
+	private final static String PROXY_TLS_PASS = "PROXIT_TLS_PASS";
+
 	/*
 	 * Used if not using java virtual threads
 	 */
 	private ExecutorService connectionPool;
 	private ExecutorService ioWorkerPool;
-	
+
 	/*
 	 * The TCP Port the proxy will listen on
 	 */
 	private int tcpPort = 0;
-	
+
+	/*
+	 * Used to create the socket the proxy will listen on, is set to either a
+	 * plain socket or a SSL socket if a cert and key are provided in a PEM file
+	 */
+	private ServerSocketFactory proxySocketFactory;
+
 	/*
 	 * The Auth Server can be used to validate JWTs presented as bearer tokens or basic 
 	 * auth passwords on the proxy request. Principle being an Auth Server can be used
@@ -96,18 +131,48 @@ public class ProxyServer implements Runnable {
 		try {
 			tcpPort = Integer.parseInt(
 					Objects.requireNonNullElse(System.getenv(PROXIT_PORT_ENV_VAR), PROXIT_DEFAULT_PORT));
-			
+
 		} catch(NumberFormatException e) {
 			throw(new IllegalArgumentException("Proxit TCP Port variable not set to integer value",e));
 		}
 
 		/*
+		 * Set up TLS on the proxy listener if requested
+		 */
+		proxySocketFactory = this.configureProxySocketFactory(
+				System.getenv(PROXY_TLS_PEM),
+				System.getenv(PROXY_TLS_PASS));
+
+		/*
 		 * Set up Auth Server integration if requested
 		 */
 		authServer = this.configureAnyAuthServer(System.getenv(AUTH_SERVER_ENV_VAR));
-		
+
 	}
-	
+
+	/**
+	 * Establish the socket factory that will be used to create the socket that proxit will use.
+	 * 
+	 * If the provided filename is a valid PEM file with a private key and cert then
+	 * the SSL socket factory will be used, presenting the provided cert for TLS. 
+	 * 
+	 * Otherwise the default plain server socket factory is used.
+	 * 
+	 * @param getenv
+	 * @return
+	 */
+	private ServerSocketFactory configureProxySocketFactory(String pemFile, String pemPass) {
+		var factory = ServerSocketFactory.getDefault();
+
+		// call ProxyTLS.getKeyStoreFromFile to return an optional keystore
+		// if none, then not using SSL
+		// else
+		// set up a keyfactory thing in an ssl context
+		// use the sslcontext to get a socket factory
+
+		return factory;
+	}
+
 	/**
 	 * Establish authorisation server integration 
 	 * 
@@ -119,29 +184,30 @@ public class ProxyServer implements Runnable {
 	 */
 	private Optional<AuthServer> configureAnyAuthServer(String authServerURL) {
 		Optional<AuthServer> response = Optional.empty();
-		
+
 		if ( authServerURL == null ) {
 			System.out.println("Not using token authentication");
-			
+
 		} else {
 			Optional<String> cacertFile = Optional.of(
 					(String) Objects.requireNonNullElse(System.getenv(AUTH_SERVER_CACERT_ENV_VAR), Optional.empty()));
-			
+
 			try {
 				response = Optional.of(new AuthServer(URI.create(authServerURL),cacertFile));
-				
+
 			} catch (Exception e) {
 				System.out.println("Unable to use the specified Auth Server URL");
 				e.printStackTrace();
 			}
 		}
-		
+
 		return response;
 	}
 
 	public void run() {
 		System.out.println("Proxy listening on port "+tcpPort);
-		try (ServerSocket server = new ServerSocket(tcpPort)) {
+
+		try (var server = proxySocketFactory.createServerSocket(tcpPort)) {
 			/*
 			 * Listen & Dispatch
 			 * New incoming connections are sent to a thread in the pool to handle
