@@ -1,35 +1,24 @@
 package xyz.arwhite.net.proxit;
 
-import java.io.BufferedReader;
-import java.io.ByteArrayInputStream;
-import java.io.FileInputStream;
-import java.io.FileNotFoundException;
 import java.io.IOException;
-import java.io.InputStreamReader;
-import java.net.ServerSocket;
 import java.net.Socket;
 import java.net.URI;
-import java.security.KeyFactory;
-import java.security.KeyStore;
+import java.security.KeyManagementException;
 import java.security.KeyStoreException;
 import java.security.NoSuchAlgorithmException;
-import java.security.cert.Certificate;
-import java.security.cert.CertificateException;
-import java.security.cert.CertificateFactory;
-import java.security.spec.InvalidKeySpecException;
-import java.security.spec.PKCS8EncodedKeySpec;
-import java.util.ArrayList;
-import java.util.Base64;
-import java.util.List;
+import java.security.SecureRandom;
+import java.security.UnrecoverableKeyException;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
 import javax.net.ServerSocketFactory;
-import javax.net.ssl.SSLServerSocketFactory;
+import javax.net.ssl.KeyManagerFactory;
+import javax.net.ssl.SSLContext;
 
 import xyz.arwhite.net.auth.AuthServer;
+
 
 public class ProxyServer implements Runnable {
 
@@ -62,7 +51,7 @@ public class ProxyServer implements Runnable {
 	 * and private key, proxit will only accept encrypted CONNECT requests
 	 */
 	private final static String PROXY_TLS_PEM = "PROXIT_TLS_PEM";
-	
+
 	/*
 	 * Required if the PROXY_TLS_PEM variable is set, in order to decrypt the
 	 * private key in the PEM file. 
@@ -163,12 +152,38 @@ public class ProxyServer implements Runnable {
 	 */
 	private ServerSocketFactory configureProxySocketFactory(String pemFile, String pemPass) {
 		var factory = ServerSocketFactory.getDefault();
+		
+		if ( pemFile == null )
+			return factory;
 
-		// call ProxyTLS.getKeyStoreFromFile to return an optional keystore
-		// if none, then not using SSL
-		// else
-		// set up a keyfactory thing in an ssl context
-		// use the sslcontext to get a socket factory
+		var keyStoreOpt = ProxyTLS.getKeyStoreFromFile(pemFile, pemPass);
+
+		if ( keyStoreOpt.isEmpty() )
+			return factory;
+
+		try {
+			KeyManagerFactory kmf = KeyManagerFactory
+					.getInstance(KeyManagerFactory.getDefaultAlgorithm());
+
+			kmf.init(keyStoreOpt.get(), "proxytls".toCharArray());
+
+			var sslContext = SSLContext.getInstance("TLS");
+			sslContext.init(kmf.getKeyManagers(), null, SecureRandom.getInstanceStrong());
+			factory = sslContext.getServerSocketFactory();
+
+		} catch (NoSuchAlgorithmException e) {
+			// TODO Auto-generated catch block
+			e.printStackTrace();
+		} catch (UnrecoverableKeyException e) {
+			// TODO Auto-generated catch block
+			e.printStackTrace();
+		} catch (KeyStoreException e) {
+			// TODO Auto-generated catch block
+			e.printStackTrace();
+		} catch (KeyManagementException e) {
+			// TODO Auto-generated catch block
+			e.printStackTrace();
+		}
 
 		return factory;
 	}

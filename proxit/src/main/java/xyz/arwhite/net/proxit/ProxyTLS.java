@@ -30,7 +30,7 @@ public class ProxyTLS {
 	protected static Optional<KeyStore> getKeyStoreFromFile(String certPEMFile, String passPhrase) {
 
 		Optional<KeyStore> response = Optional.empty();
-
+		
 		try( var pemReader = new BufferedReader(
 				new InputStreamReader(new FileInputStream(certPEMFile))) ) {
 
