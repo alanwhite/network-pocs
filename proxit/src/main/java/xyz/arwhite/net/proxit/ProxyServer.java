@@ -129,8 +129,8 @@ public class ProxyServer implements Runnable {
 		 * Set up TLS on the proxy listener if requested
 		 */
 		proxySocketFactory = this.configureProxySocketFactory(
-				System.getenv(PROXY_TLS_PEM),
-				System.getenv(PROXY_TLS_PASS));
+				Optional.ofNullable(System.getenv(PROXY_TLS_PEM)),
+				Optional.ofNullable(System.getenv(PROXY_TLS_PASS)));
 
 		/*
 		 * Set up Auth Server integration if requested
@@ -150,13 +150,13 @@ public class ProxyServer implements Runnable {
 	 * @param getenv
 	 * @return
 	 */
-	private ServerSocketFactory configureProxySocketFactory(String pemFile, String pemPass) {
+	private ServerSocketFactory configureProxySocketFactory(Optional<String> pemFile, Optional<String> pemPass) {
 		var factory = ServerSocketFactory.getDefault();
 		
-		if ( pemFile == null )
+		if ( pemFile.isEmpty() )
 			return factory;
 
-		var keyStoreOpt = ProxyTLS.getKeyStoreFromFile(pemFile, pemPass);
+		var keyStoreOpt = ProxyTLS.createKeyStoreFromPEM(pemFile.get(), pemPass);
 
 		if ( keyStoreOpt.isEmpty() )
 			return factory;
